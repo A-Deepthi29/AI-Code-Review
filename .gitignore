@@ -1,0 +1,13 @@
+# Node.js dependencies
+node_modules/
+dist/
+build/
+
+# Environment variables (API keys, DB secrets)
+.env
+.env.local
+.env.development.local
+
+# Operating system files
+.DS_Store
+Thumbs.db

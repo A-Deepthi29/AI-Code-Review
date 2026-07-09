@@ -16,6 +16,10 @@ app.use(express.json());
 const authRoutes = require('./routes/auth');
 // Add this line right below your app.use(express.json()) line:
 app.use('/api/auth', authRoutes);
+const reviewRoutes = require('./routes/review');
+
+// Add this right below your app.use('/api/auth', authRoutes) line:
+app.use('/api/reviews', reviewRoutes);
 
 // Simple Test Route
 app.get('/test', (req, res) => {

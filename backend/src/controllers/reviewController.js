@@ -1,45 +1,142 @@
-const db = require('../utils/db');
+// backend/src/controllers/reviewController.js
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const axios = require('axios'); // ADDED: Required to communicate with the GitHub API
+const { generateCodeReview } = require('../utils/ai');
 
-exports.submitSnippet = async (req, res) => {
-    const { codeSnippet, language } = req.body;
-    
-    // Hardcoded user ID fallback for testing until frontend attaches full JWT headers
-    const userId = req.user?.id || 1; 
+/**
+ * Helper function to promisify shell executions.
+ * This unifies asynchronous execution contexts into clean async/await syntax.
+ */
+const runCommand = (cmd) => {
+  return new Promise((resolve) => {
+    exec(cmd, (error, stdout, stderr) => {
+      // We resolve even if there's an error because linters return exit code 1 when code errors are found
+      resolve({ stdout, stderr });
+    });
+  });
+};
 
-    if (!codeSnippet) {
-        return res.status(400).json({ error: "Code snippet content cannot be empty." });
+const analyzeCode = async (req, res) => {
+  let filePath = '';
+  let codeContent = '';
+
+  try {
+    // 1. DETERMINE INPUT TYPE & EXTRACT RAW CONTENT
+    if (req.file) {
+      // Branch A: Direct file upload
+      filePath = req.file.path;
+      codeContent = fs.readFileSync(filePath, 'utf8');
+
+    } else if (req.body.codeText) {
+      // Branch B: Raw pasted code text
+      codeContent = req.body.codeText;
+      const uniqueName = `paste-${Date.now()}.js`;
+      filePath = path.join(__dirname, '../tmp', uniqueName);
+      fs.writeFileSync(filePath, codeContent, 'utf8');
+
+    } else if (req.body.owner && req.body.repo && req.body.path) {
+      // Branch C: ADDED - Day 5 GitHub Repository payload parser
+      const { owner, repo, path: githubFilePath } = req.body;
+      
+      // Fetch the file contents from GitHub
+      const githubUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${githubFilePath}`;
+      const response = await axios.get(githubUrl);
+      
+      // Decode the Base64 response text into raw string text
+      codeContent = Buffer.from(response.data.content, 'base64').toString('utf-8');
+      
+      // Write to local temp directory so Oxlint can analyze it locally
+      const uniqueName = `github-${Date.now()}-${path.basename(githubFilePath)}`;
+      filePath = path.join(__dirname, '../tmp', uniqueName);
+      fs.writeFileSync(filePath, codeContent, 'utf8');
+
+    } else {
+      return res.status(400).json({ error: 'No code content, file uploaded, or GitHub repository parameters provided.' });
     }
+
+    // 2. STAGE 1: RUN OXLINT STATIC COMPLIANCE CHECK
+    const oxlintCommand = `npx oxlint --format json "${filePath}"`;
+    const { stdout } = await runCommand(oxlintCommand);
+
+    let rawLinterResults = [];
+    try {
+      // ONLY attempt to parse if stdout exists AND looks like a JSON array or object
+      if (stdout && (stdout.trim().startsWith('[') || stdout.trim().startsWith('{'))) {
+        const parsedOutput = JSON.parse(stdout);
+        if (Array.isArray(parsedOutput)) {
+          rawLinterResults = parsedOutput;
+        } else if (parsedOutput && Array.isArray(parsedOutput.errors)) {
+          rawLinterResults = parsedOutput.errors;
+        } else if (parsedOutput && typeof parsedOutput === 'object') {
+          rawLinterResults = parsedOutput.diagnostics || [];
+        }
+      } else {
+        console.log("Oxlint skipped analysis or returned text warning. Proceeding directly to AI engine.");
+      }
+    } catch (parseErr) {
+      console.error("Oxlint JSON parsing exception ignored:", parseErr.message);
+    }
+
+    // Map linter issues safely into the unified database schema layout
+    const staticFindings = Array.isArray(rawLinterResults) 
+      ? rawLinterResults.map(issue => ({
+          severity: issue.severity ? issue.severity.toLowerCase() : 'warning',
+          issue: issue.message || 'Linter Rule Violation',
+          explanation: issue.help || 'Refactor code to follow standard practices.',
+          line_number: issue.span && issue.span.start ? issue.span.start : 0,
+          file_name: path.basename(filePath)
+        }))
+      : [];
+
+    // 3. STAGE 2: PIPELINE PASS TO INTELLIGENT COMPLIANCE ANALYSIS
+    let integratedFindings = [...staticFindings];
+    let finalizedScore = staticFindings.length > 0 ? 90 : 100;
+    let reviewSummary = "Static analysis completed successfully.";
+    let reviewComplexity = { cyclomatic: 0, line_count: codeContent.split('\n').length };
 
     try {
-        // 1. Create a placeholder project reference for this submission
-        const projectRes = await db.query(
-            'INSERT INTO projects (user_id, project_name) VALUES ($1, $2) RETURNING id',
-            [userId, `Snippet Review (${language || 'JavaScript'})`]
-        );
-        const projectId = projectRes.rows[0].id;
+      const aiReviewResult = await generateCodeReview(codeContent, staticFindings);
+      
+      // Merge static linter structures with deep AI insights
+      integratedFindings = [...staticFindings, ...aiReviewResult.findings];
+      finalizedScore = aiReviewResult.overall_score;
+      reviewSummary = aiReviewResult.summary;
+      reviewComplexity = aiReviewResult.complexity || reviewComplexity;
 
-        // 2. Insert a new record into the Reviews table
-        // For Day 4, overall_score and summary act as pending storage placeholders
-        const reviewRes = await db.query(
-            'INSERT INTO reviews (project_id, review_type, overall_score, summary) VALUES ($1, $2, $3, $4) RETURNING id, created_at',
-            [projectId, 'snippet', 0, 'Pending analysis...']
-        );
-        const reviewId = reviewRes.rows[0].id;
-
-        // 3. Temporarily save the raw code into a placeholder findings row until static analysis is connected
-        await db.query(
-            'INSERT INTO review_findings (review_id, severity, issue, explanation, suggested_fix) VALUES ($1, $2, $3, $4, $5)',
-            [reviewId, 'info', 'Code Saved', 'Code snippet successfully queued for evaluation.', codeSnippet]
-        );
-
-        res.status(201).json({
-            message: "🚀 Code snippet successfully stored in database!",
-            reviewId,
-            projectId,
-            timestamp: reviewRes.rows[0].created_at
-        });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: err.message });
+      if (staticFindings.length > 0) {
+        finalizedScore = Math.max(10, finalizedScore - (staticFindings.length * 2));
+      }
+    } catch (aiErr) {
+      console.error("Pipeline warning: Stage 2 (AI Engine) failed:", aiErr.message);
+      reviewSummary += " Intelligent deep review analysis was restricted due to processing errors.";
     }
+
+    // 4. DISPATCH SUCCESS RESPONSE
+    return res.status(200).json({
+      success: true,
+      project_metrics: {
+        overall_score: finalizedScore,
+        summary: reviewSummary,
+        complexity: reviewComplexity
+      },
+      findings: integratedFindings
+    });
+
+  } catch (serverErr) {
+    console.error("Global pipeline process failure:", serverErr);
+    return res.status(500).json({ error: "Internal Analysis Engine Exception processing request." });
+  } finally {
+    // 5. GUARANTEED CLEANUP (Wipes temp file regardless of GitHub source or manual input strings)
+    if (filePath && fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (cleanupErr) {
+        console.error("Failed to delete temp file:", cleanupErr);
+      }
+    }
+  }
 };
+
+module.exports = { analyzeCode };

@@ -39,3 +39,12 @@ app.listen(PORT, async () => {
         console.error('❌ Database connection error:', err.message);
     }
 });
+
+// Catch-all safety nets to explicitly log exactly what is killing your server process
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('💥 Catastrophic Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+    console.error('💥 Catastrophic Uncaught Exception thrown:', err.message, err.stack);
+});

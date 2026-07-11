@@ -1,142 +1,150 @@
-// backend/src/controllers/reviewController.js
-const { exec } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-const axios = require('axios'); // ADDED: Required to communicate with the GitHub API
-const { generateCodeReview } = require('../utils/ai');
+const db = require("../utils/db");
+const { Linter } = require("eslint");
 
-/**
- * Helper function to promisify shell executions.
- * This unifies asynchronous execution contexts into clean async/await syntax.
- */
-const runCommand = (cmd) => {
-  return new Promise((resolve) => {
-    exec(cmd, (error, stdout, stderr) => {
-      // We resolve even if there's an error because linters return exit code 1 when code errors are found
-      resolve({ stdout, stderr });
-    });
-  });
-};
+const linter = new Linter();
 
-const analyzeCode = async (req, res) => {
-  let filePath = '';
-  let codeContent = '';
-
-  try {
-    // 1. DETERMINE INPUT TYPE & EXTRACT RAW CONTENT
-    if (req.file) {
-      // Branch A: Direct file upload
-      filePath = req.file.path;
-      codeContent = fs.readFileSync(filePath, 'utf8');
-
-    } else if (req.body.codeText) {
-      // Branch B: Raw pasted code text
-      codeContent = req.body.codeText;
-      const uniqueName = `paste-${Date.now()}.js`;
-      filePath = path.join(__dirname, '../tmp', uniqueName);
-      fs.writeFileSync(filePath, codeContent, 'utf8');
-
-    } else if (req.body.owner && req.body.repo && req.body.path) {
-      // Branch C: ADDED - Day 5 GitHub Repository payload parser
-      const { owner, repo, path: githubFilePath } = req.body;
-      
-      // Fetch the file contents from GitHub
-      const githubUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${githubFilePath}`;
-      const response = await axios.get(githubUrl);
-      
-      // Decode the Base64 response text into raw string text
-      codeContent = Buffer.from(response.data.content, 'base64').toString('utf-8');
-      
-      // Write to local temp directory so Oxlint can analyze it locally
-      const uniqueName = `github-${Date.now()}-${path.basename(githubFilePath)}`;
-      filePath = path.join(__dirname, '../tmp', uniqueName);
-      fs.writeFileSync(filePath, codeContent, 'utf8');
-
-    } else {
-      return res.status(400).json({ error: 'No code content, file uploaded, or GitHub repository parameters provided.' });
-    }
-
-    // 2. STAGE 1: RUN OXLINT STATIC COMPLIANCE CHECK
-    const oxlintCommand = `npx oxlint --format json "${filePath}"`;
-    const { stdout } = await runCommand(oxlintCommand);
-
-    let rawLinterResults = [];
-    try {
-      // ONLY attempt to parse if stdout exists AND looks like a JSON array or object
-      if (stdout && (stdout.trim().startsWith('[') || stdout.trim().startsWith('{'))) {
-        const parsedOutput = JSON.parse(stdout);
-        if (Array.isArray(parsedOutput)) {
-          rawLinterResults = parsedOutput;
-        } else if (parsedOutput && Array.isArray(parsedOutput.errors)) {
-          rawLinterResults = parsedOutput.errors;
-        } else if (parsedOutput && typeof parsedOutput === 'object') {
-          rawLinterResults = parsedOutput.diagnostics || [];
-        }
-      } else {
-        console.log("Oxlint skipped analysis or returned text warning. Proceeding directly to AI engine.");
-      }
-    } catch (parseErr) {
-      console.error("Oxlint JSON parsing exception ignored:", parseErr.message);
-    }
-
-    // Map linter issues safely into the unified database schema layout
-    const staticFindings = Array.isArray(rawLinterResults) 
-      ? rawLinterResults.map(issue => ({
-          severity: issue.severity ? issue.severity.toLowerCase() : 'warning',
-          issue: issue.message || 'Linter Rule Violation',
-          explanation: issue.help || 'Refactor code to follow standard practices.',
-          line_number: issue.span && issue.span.start ? issue.span.start : 0,
-          file_name: path.basename(filePath)
-        }))
-      : [];
-
-    // 3. STAGE 2: PIPELINE PASS TO INTELLIGENT COMPLIANCE ANALYSIS
-    let integratedFindings = [...staticFindings];
-    let finalizedScore = staticFindings.length > 0 ? 90 : 100;
-    let reviewSummary = "Static analysis completed successfully.";
-    let reviewComplexity = { cyclomatic: 0, line_count: codeContent.split('\n').length };
-
-    try {
-      const aiReviewResult = await generateCodeReview(codeContent, staticFindings);
-      
-      // Merge static linter structures with deep AI insights
-      integratedFindings = [...staticFindings, ...aiReviewResult.findings];
-      finalizedScore = aiReviewResult.overall_score;
-      reviewSummary = aiReviewResult.summary;
-      reviewComplexity = aiReviewResult.complexity || reviewComplexity;
-
-      if (staticFindings.length > 0) {
-        finalizedScore = Math.max(10, finalizedScore - (staticFindings.length * 2));
-      }
-    } catch (aiErr) {
-      console.error("Pipeline warning: Stage 2 (AI Engine) failed:", aiErr.message);
-      reviewSummary += " Intelligent deep review analysis was restricted due to processing errors.";
-    }
-
-    // 4. DISPATCH SUCCESS RESPONSE
-    return res.status(200).json({
-      success: true,
-      project_metrics: {
-        overall_score: finalizedScore,
-        summary: reviewSummary,
-        complexity: reviewComplexity
-      },
-      findings: integratedFindings
-    });
-
-  } catch (serverErr) {
-    console.error("Global pipeline process failure:", serverErr);
-    return res.status(500).json({ error: "Internal Analysis Engine Exception processing request." });
-  } finally {
-    // 5. GUARANTEED CLEANUP (Wipes temp file regardless of GitHub source or manual input strings)
-    if (filePath && fs.existsSync(filePath)) {
-      try {
-        fs.unlinkSync(filePath);
-      } catch (cleanupErr) {
-        console.error("Failed to delete temp file:", cleanupErr);
-      }
-    }
+const eslintConfig = {
+  languageOptions: {
+    ecmaVersion: "latest",
+    sourceType: "module"
+  },
+  rules: {
+    "no-unused-vars": "warn",
+    "eqeqeq": "error",
+    "no-undef": "error"
   }
 };
 
-module.exports = { analyzeCode };
+const analyzeCode = async (req, res) => {
+  try {
+    console.log("Received request body:", req.body);
+
+    const { codeText, language } = req.body;
+
+    const userId = 1;
+
+    if (!codeText) {
+      return res.status(400).json({
+        error: "Code snippet cannot be empty."
+      });
+    }
+
+    // ------------------------
+    // Stage 1 - Static Analysis
+    // ------------------------
+
+    const lintMessages = linter.verify(codeText, eslintConfig);
+
+    const issuesFoundCount = lintMessages.length;
+
+    const overallScore = Math.max(
+      100 - issuesFoundCount * 10,
+      0
+    );
+
+    const summary =
+      issuesFoundCount === 0
+        ? "Clean Pass! No structural anomalies found."
+        : `Static Analysis found ${issuesFoundCount} issue(s).`;
+
+    // ------------------------
+    // Stage 2 - Save Project
+    // ------------------------
+
+    const projectResult = await db.query(
+      `
+      INSERT INTO projects(user_id,project_name)
+      VALUES($1,$2)
+      RETURNING id
+      `,
+      [
+        userId,
+        `Snippet Review (${language || "JavaScript"})`
+      ]
+    );
+
+    const projectId = projectResult.rows[0].id;
+
+    // ------------------------
+    // Stage 3 - Save Review
+    // ------------------------
+
+    const reviewResult = await db.query(
+      `
+      INSERT INTO reviews
+      (
+        project_id,
+        review_type,
+        overall_score,
+        summary
+      )
+      VALUES($1,$2,$3,$4)
+      RETURNING id
+      `,
+      [
+        projectId,
+        "snippet",
+        overallScore,
+        summary
+      ]
+    );
+
+    const reviewId = reviewResult.rows[0].id;
+
+    // ------------------------
+    // Stage 4 - Save Findings
+    // ------------------------
+
+    if (issuesFoundCount > 0) {
+
+      for (const issue of lintMessages) {
+
+        await db.query(
+`
+INSERT INTO review_findings
+(
+review_id,
+severity,
+issue,
+explanation,
+suggested_fix,
+line_number
+)
+VALUES($1,$2,$3,$4,$5,$6)
+`,
+[
+reviewId,
+issue.severity === 2 ? "critical" : "warning",
+issue.ruleId || "syntax",
+issue.message,
+"Please fix this issue.",
+issue.line || 1
+]
+);
+
+      }
+
+    }
+
+    return res.status(201).json({
+      success: true,
+      reviewId,
+      overallScore,
+      summary,
+      issues: lintMessages
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    return res.status(500).json({
+      error: err.message
+    });
+
+  }
+};
+
+module.exports = {
+  analyzeCode
+};

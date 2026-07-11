@@ -6,40 +6,57 @@ export default function SubmitCode() {
   const [statusMessage, setStatusMessage] = useState(null);
 
   const handleSubmit = async () => {
-    if (!code.trim()) {
-      alert("Please paste some code before submitting!");
-      return;
-    }
+  if (!code.trim()) {
+    alert("Please paste some code before submitting!");
+    return;
+  }
 
-    setLoading(true);
-    setStatusMessage(null);
+  setLoading(true);
+  setStatusMessage(null);
 
-    try {
-      const response = await fetch('http://localhost:5000/api/reviews/submit-snippet', {
-        method: 'POST',
+  try {
+    const response = await fetch(
+      "http://localhost:5000/api/reviews/analyze",
+      {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          codeSnippet: code,
-          language: 'javascript'
-        })
+    codeText: code,
+    language: "JavaScript"
+}),
+      }
+    );
+
+    const data = await response.json();
+
+    console.log(data);
+
+    if (response.ok) {
+      setStatusMessage({
+        type: "success",
+        text: `✅ Saved successfully! Review ID: ${data.reviewId}`,
       });
 
-      const data = await response.json();
-
-      if (response.ok) {
-        setStatusMessage({ type: 'success', text: `✅ Saved successfully! Review ID: ${data.reviewId}` });
-        setCode(''); // Clear the textarea upon completion
-      } else {
-        setStatusMessage({ type: 'error', text: data.error || 'Submission failed' });
-      }
-    } catch (error) {
-      setStatusMessage({ type: 'error', text: 'Could not connect to the backend server.' });
-    } finally {
-      setLoading(false);
+      setCode("");
+    } else {
+      setStatusMessage({
+        type: "error",
+        text: data.error || "Submission failed",
+      });
     }
-  };
+  } catch (error) {
+    console.error(error);
+
+    setStatusMessage({
+      type: "error",
+      text: "Could not connect to the backend server.",
+    });
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="space-y-6">

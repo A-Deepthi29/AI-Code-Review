@@ -1,40 +1,90 @@
-// backend/src/utils/ai.js
-const { GoogleGenAI } = require('@google/genai');
-require('dotenv').config(); 
+const OpenAI = require("openai");
 
-// Connect using your fresh, active key from your environment file
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const client = new OpenAI({
+  apiKey: process.env.GROQ_API_KEY,
+  baseURL: "https://api.groq.com/openai/v1",
+});
 
-async function generateCodeReview(codeText) {
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash", // Updated to the active production model
-      contents: `Analyze the following JavaScript code and provide a code review in strict JSON format. 
-      The JSON object must contain exactly an "overall_score" (0-100), a "summary" string, and a "findings" array of objects.
-      
-      Code to analyze:
-      ${codeText}`,
-      config: {
-        responseMimeType: "application/json" // Tells Gemini to output clean, raw JSON
-      }
-    });
 
-    let rawText = response.text;
-    if (!rawText) {
-      throw new Error("Empty response received from the Gemini AI engine.");
+/**
+ * Analyzes a code snippet and returns a structured breakdown of issues and improvements.
+ * @param {string} codeSnippet - The raw text of the code to analyze.
+ * @returns {Promise<Object>} Structured response containing overall score, summary, and findings.
+ */
+async function generateCodeReview(codeSnippet) {
+    try {
+        const prompt = `
+            You are an expert senior code reviewer. Analyze the following code snippet for code smells, bugs, performance improvements, and security issues.
+            
+            Code to analyze:
+            \`\`\`javascript
+            ${codeSnippet}
+            \`\`\`
+            
+            You MUST respond with a valid JSON object matching this schema. Do not include markdown wraps like \`\`\`json.
+            {
+                "overallScore": 85, // Integer from 0-100 based on code quality
+                "summary": "Brief high-level summary paragraph explaining the strengths and absolute weaknesses.",
+                "findings": [
+                    {
+                        "severity": "high", // must be "high", "medium", or "info"
+                        "issue": "Brief name of the problem (e.g., SQL Injection, Poor Performance)",
+                        "explanation": "Detailed clear reason why this code structure is bad.",
+                        "suggestedFix": "Example code or text showing exactly how to fix it.",
+                        "lineNumber": 3 // Approximated line number of the issue if visible, otherwise 1
+                    }
+                ]
+            }
+        `;
+
+        // Using the recommended fast and smart text model
+        const response = await client.chat.completions.create({
+  model: "llama-3.3-70b-versatile",
+  messages: [
+    {
+      role: "user",
+      content: prompt,
+    },
+  ],
+  temperature: 0.2,
+});
+
+        // Clean text response in case markdown blocks were added back accidentally
+        let jsonText = response.choices[0].message.content.trim();
+        if (jsonText.startsWith('```json')) jsonText = jsonText.substring(7);
+        if (jsonText.endsWith('```')) jsonText = jsonText.substring(0, jsonText.length - 3);
+
+        return JSON.parse(jsonText.trim());
+    } catch (error) {
+    console.error("========== GEMINI ERROR ==========");
+    console.error(error);
+
+    if (error.message) {
+        console.error("Message:", error.message);
     }
 
-    // Defensive cleanup in case markdown ticks wrap the output
-    if (rawText.includes("```")) {
-      rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+    if (error.status) {
+        console.error("Status:", error.status);
     }
 
-    return JSON.parse(rawText);
+    if (error.response) {
+        console.error("Response:", error.response);
+    }
 
-  } catch (error) {
-    console.error("AI Context evaluation fault:", error);
-    throw error;
-  }
+    return {
+        overallScore: 50,
+        summary: "AI Review failed to initialize properly. Storing fallback status.",
+        findings: [
+            {
+                severity: "info",
+                issue: "AI Execution Timeout",
+                explanation: "Could not successfully complete remote LLM execution loop.",
+                suggestedFix: "Check your Gemini API configuration.",
+                lineNumber: 1
+            }
+        ]
+    };
+}
 }
 
 module.exports = { generateCodeReview };

@@ -3,6 +3,7 @@ const db = require("../utils/db");
 const { Linter } = require("eslint");
 const { generateCodeReview } = require("../utils/ai"); // Day 8 AI Engine Utility
 const analyzeComplexity = require("../utils/complexity");
+const { generateDocumentation } = require("../utils/documentation");
 
 const linter = new Linter();
 
@@ -89,6 +90,7 @@ const analyzeCode = async (req, res) => {
     } catch(error){
     console.error(error);
     }
+    const documentation = await generateDocumentation(codeText);
 
     // ----------------------------------------------------
     // STAGE 3: DATABASE PERSISTENCE (PostgreSQL)
@@ -164,21 +166,24 @@ await db.query(
     // STAGE 4: DISPATCH RESPONSE TO FRONTEND DASHBOARD
     // ----------------------------------------------------
     return res.status(201).json({
-      success: true,
-      reviewId: reviewId,
-      project_metrics: {
+    success: true,
+    reviewId,
+
+    project_metrics: {
         overall_score: finalizedScore,
         summary: reviewSummary,
         complexity: {
-    cyclomaticComplexity: metrics.cyclomaticComplexity,
-    linesOfCode: metrics.linesOfCode,
-    numberOfFunctions: metrics.numberOfFunctions,
-    numberOfClasses: metrics.numberOfClasses
-}
-      },
-      findings: integratedFindings
-    });
+            cyclomaticComplexity: metrics.cyclomaticComplexity,
+            linesOfCode: metrics.linesOfCode,
+            numberOfFunctions: metrics.numberOfFunctions,
+            numberOfClasses: metrics.numberOfClasses
+        }
+    },
 
+    findings: integratedFindings,
+
+    documentation
+});
   } catch (err) {
     console.error("Global Analysis Engine Exception:", err);
     return res.status(500).json({

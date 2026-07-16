@@ -192,6 +192,165 @@ await db.query(
   }
 };
 
+const getReviewHistory = async (req, res) => {
+  try {
+
+    const result = await db.query(`
+      SELECT
+        reviews.id,
+        reviews.overall_score,
+        reviews.summary,
+        reviews.created_at,
+        projects.project_name
+      FROM reviews
+      JOIN projects
+      ON reviews.project_id = projects.id
+      ORDER BY reviews.created_at DESC
+    `);
+
+    return res.status(200).json(result.rows);
+
+  } catch (err) {
+
+    console.error(err);
+
+    return res.status(500).json({
+      error: "Unable to fetch review history."
+    });
+
+  }
+};
+
+const deleteReview = async (req, res) => {
+    try {
+
+        const { id } = req.params;
+
+        // Find project id
+        const projectResult = await db.query(
+            `
+            SELECT project_id
+            FROM reviews
+            WHERE id=$1
+            `,
+            [id]
+        );
+
+        if (projectResult.rows.length === 0) {
+            return res.status(404).json({
+                error: "Review not found."
+            });
+        }
+
+        const projectId = projectResult.rows[0].project_id;
+
+        // Delete findings
+        await db.query(
+            `
+            DELETE FROM review_findings
+            WHERE review_id=$1
+            `,
+            [id]
+        );
+
+        // Delete review
+        await db.query(
+            `
+            DELETE FROM reviews
+            WHERE id=$1
+            `,
+            [id]
+        );
+
+        // Delete project
+        await db.query(
+            `
+            DELETE FROM projects
+            WHERE id=$1
+            `,
+            [projectId]
+        );
+
+        return res.json({
+            success: true,
+            message: "Review deleted successfully."
+        });
+
+    } catch (err) {
+
+        console.error(err);
+
+        return res.status(500).json({
+            error: "Unable to delete review."
+        });
+
+    }
+};
+
+const getReviewById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    console.log("Requested Review ID:", id);
+
+    const reviewResult = await db.query(
+      `
+      SELECT
+        reviews.id,
+        reviews.overall_score,
+        reviews.summary,
+        reviews.created_at,
+        projects.project_name
+      FROM reviews
+      JOIN projects
+      ON reviews.project_id = projects.id
+      WHERE reviews.id = $1
+      `,
+      [id]
+    );
+
+    console.log("Rows Returned:", reviewResult.rows);
+
+    if (reviewResult.rows.length === 0) {
+      return res.status(404).json({
+        error: "Review not found."
+      });
+    }
+
+    const findingsResult = await db.query(
+      `
+      SELECT
+        severity,
+        issue,
+        explanation,
+        suggested_fix,
+        file_name,
+        line_number
+      FROM review_findings
+      WHERE review_id = $1
+      ORDER BY id
+      `,
+      [id]
+    );
+
+    console.log("Findings:", findingsResult.rows.length);
+
+    return res.json({
+      review: reviewResult.rows[0],
+      findings: findingsResult.rows
+    });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({
+      error: err.message
+    });
+  }
+};
+
 module.exports = {
-  analyzeCode
+    analyzeCode,
+    getReviewHistory,
+    deleteReview,
+    getReviewById
 };

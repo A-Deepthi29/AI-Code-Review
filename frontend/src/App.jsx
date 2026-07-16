@@ -3,6 +3,7 @@ import DashboardLayout from './layouts/DashboardLayout';
 import SubmitCode from './pages/SubmitCode';
 import History from './pages/History';
 
+
 function App() {
   return (
     <Router>
@@ -12,9 +13,9 @@ function App() {
         
         {/* Protected Application Wrapper */}
         <Route path="/dashboard" element={<DashboardLayout />}>
-          <Route index element={<SubmitCode />} />
-          <Route path="history" element={<History />} />
-        </Route>
+    <Route index element={<SubmitCode />} />
+    <Route path="history" element={<History />} />
+</Route>
       </Routes>
     </Router>
   );

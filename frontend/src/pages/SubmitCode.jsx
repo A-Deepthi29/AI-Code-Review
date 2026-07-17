@@ -5,69 +5,102 @@ export default function SubmitCode() {
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
   const [reviewResults, setReviewResults] = useState(null);
+  const [error, setError] = useState("");
+  const allowedExtensions = [
+  ".js",
+  ".jsx",
+  ".java",
+  ".py",
+  ".cpp",
+  ".c"
+];
+
+  const handleFileUpload = (e) => {
+  const file = e.target.files[0];
+
+  if (!file) return;
+
+  const fileName = file.name.toLowerCase();
+
+  const valid = allowedExtensions.some((ext) =>
+    fileName.endsWith(ext)
+  );
+
+  if (!valid) {
+    alert("Only .js, .jsx, .java, .py, .cpp and .c files are allowed.");
+    e.target.value = "";
+    return;
+  }
+
+  const reader = new FileReader();
+
+  reader.onload = (event) => {
+    setCode(event.target.result);
+  };
+
+  reader.readAsText(file);
+};
 
   const handleSubmit = async () => {
     if (!code.trim()) {
-      alert("Please paste some code before submitting!");
-      return;
-    }
+    setError("Please enter some code.");
+    return;
+}
+
+setError("");
 
     setLoading(true);
     setStatusMessage(null);
     setReviewResults(null);
 
     try {
-      const response = await fetch(
+    const response = await fetch(
         "http://localhost:5000/api/reviews/analyze",
         {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            codeText: code,
-            language: "JavaScript",
-          }),
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                codeText: code,
+                language: "JavaScript",
+            }),
         }
-      );
+    );
 
-      const data = await response.json();
+    const data = await response.json();
 
-      console.log("Backend Response:", data);
+    if (!response.ok) {
+        throw new Error(data.error || "Analysis failed.");
+    }
 
-      if (response.ok) {
-        setStatusMessage({
-          type: "success",
-          text: "✅ Code analyzed successfully!",
-        });
+    setStatusMessage({
+        type: "success",
+        text: "✅ Code analyzed successfully!",
+    });
 
-        setReviewResults({
-          overallScore: data.project_metrics?.overall_score ?? 0,
-          summary: data.project_metrics?.summary ?? "",
-          complexity: data.project_metrics?.complexity ?? {},
-          issues: data.findings ?? [],
-          documentation: data.documentation ?? {
+    setReviewResults({
+        overallScore: data.project_metrics?.overall_score ?? 0,
+        summary: data.project_metrics?.summary ?? "",
+        complexity: data.project_metrics?.complexity ?? {},
+        issues: data.findings ?? [],
+        documentation: data.documentation ?? {
             functions: [],
             classes: [],
             apis: [],
-          },
-        });
-      } else {
-        setStatusMessage({
-          type: "error",
-          text: data.error || "Submission failed",
-        });
-      }
-    } catch (err) {
-      console.error(err);
+        },
+    });
 
-      setStatusMessage({
+} catch (err) {
+
+    console.error("API Error:", err);
+
+    setStatusMessage({
         type: "error",
-        text: "Could not connect to backend server.",
-      });
-    } finally {
-      setLoading(false);
-    }
+        text: err.message || "Unable to connect to the server.",
+    });
+
+}
   };
 
   const getScoreColor = (score) => {
@@ -113,7 +146,26 @@ export default function SubmitCode() {
       {/* Code Editor */}
 
       <div className="bg-slate-950 border border-slate-800 rounded-xl p-6">
+        <div className="mb-4">
 
+  <label className="block text-slate-300 mb-2 font-semibold">
+    Upload Source Code File
+  </label>
+
+  <input
+  type="file"
+  accept=".js,.jsx,.java,.py,.cpp,.c"
+  onChange={handleFileUpload}
+  className="block w-full text-sm text-slate-300 mb-4
+             file:bg-blue-600
+             file:text-white
+             file:border-0
+             file:px-4
+             file:py-2
+             file:rounded-lg"
+/>
+
+</div>
         <textarea
           value={code}
           onChange={(e) => setCode(e.target.value)}
@@ -123,6 +175,7 @@ export default function SubmitCode() {
         />
 
         <div className="mt-5 flex justify-end">
+          {error && <p className="text-red-400 text-sm mb-2">{error}</p>}
           <button
             onClick={handleSubmit}
             disabled={loading}

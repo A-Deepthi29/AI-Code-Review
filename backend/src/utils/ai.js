@@ -56,7 +56,7 @@ async function generateCodeReview(codeSnippet) {
 
         return JSON.parse(jsonText.trim());
     } catch (error) {
-    console.error("========== GEMINI ERROR ==========");
+    console.error("========== GROQ ERROR ==========");
     console.error(error);
 
     if (error.message) {
@@ -72,18 +72,21 @@ async function generateCodeReview(codeSnippet) {
     }
 
     return {
-        overallScore: 50,
-        summary: "AI Review failed to initialize properly. Storing fallback status.",
-        findings: [
-            {
-                severity: "info",
-                issue: "AI Execution Timeout",
-                explanation: "Could not successfully complete remote LLM execution loop.",
-                suggestedFix: "Check your Gemini API configuration.",
-                lineNumber: 1
-            }
-        ]
-    };
+    overallScore: 50,
+    summary:
+        "Groq AI service is currently unavailable. Static analysis completed successfully.",
+    findings: [
+        {
+            severity: "info",
+            issue: "AI Service Unavailable",
+            explanation:
+                "The Groq API could not generate AI suggestions.",
+            suggestedFix:
+                "Verify your Groq API key or network connection.",
+            lineNumber: 1
+        }
+    ]
+};
 }
 }
 

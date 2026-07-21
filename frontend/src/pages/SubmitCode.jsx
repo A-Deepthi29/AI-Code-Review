@@ -55,7 +55,7 @@ setError("");
 
     try {
     const response = await fetch(
-        "http://localhost:5000/api/reviews/analyze",
+        `${import.meta.env.VITE_API_URL}/api/reviews/analyze`,
         {
             method: "POST",
             headers: {

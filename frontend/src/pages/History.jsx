@@ -11,7 +11,7 @@ export default function History() {
   const fetchReviews = () => {
     setLoading(true);
 
-    fetch("https://ai-code-review-yekr.onrender.com/api/reviews/history")
+    fetch(`${import.meta.env.VITE_API_URL}/api/reviews/history`)
       .then((res) => res.json())
       .then((data) => {
         setReviews(data);
@@ -37,7 +37,7 @@ export default function History() {
 
     try {
       const response = await fetch(
-        `http://localhost:5000/api/reviews/${id}`,
+        `${import.meta.env.VITE_API_URL}/api/reviews/${id}`,
         {
           method: "DELETE",
         }
@@ -59,7 +59,7 @@ export default function History() {
 const viewDetails = async (id) => {
   try {
     const response = await fetch(
-      `http://localhost:5000/api/reviews/${id}`
+      `${import.meta.env.VITE_API_URL}/api/reviews/${id}`
     );
 
     const data = await response.json();

@@ -11,7 +11,7 @@ export default function History() {
   const fetchReviews = () => {
     setLoading(true);
 
-    fetch("http://localhost:5000/api/reviews/history")
+    fetch("https://ai-code-review-yekr.onrender.com/api/reviews/history")
       .then((res) => res.json())
       .then((data) => {
         setReviews(data);
